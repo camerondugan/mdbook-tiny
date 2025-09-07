@@ -1181,6 +1181,8 @@ dependencies = [
  "mdbook",
  "pulldown-cmark 0.13.0",
  "regex",
+ "serde",
+ "serde_derive",
 ]
 
 [[package]]

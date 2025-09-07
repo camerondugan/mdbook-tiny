@@ -1,11 +1,14 @@
 extern crate mdbook;
 extern crate pulldown_cmark;
+extern crate serde;
+extern crate serde_derive;
 
 use mdbook::renderer::RenderContext;
 use mdbook::utils::fs::copy_files_except_ext;
 use mdbook::{BookItem, book::Chapter};
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::io::Write as ioWrite;
 use std::path::Path;
@@ -16,9 +19,34 @@ use std::{
     path::PathBuf,
 };
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "kebab-case")]
+pub struct TinyConfig {
+    pub css_path: String,
+    pub nav_separator: String,
+    pub index: Option<String>,
+    pub nav_bottom_empty: bool,
+}
+
+impl Default for TinyConfig {
+    fn default() -> Self {
+        Self {
+            css_path: Default::default(),
+            nav_separator: " - ".to_string(),
+            index: None,
+            nav_bottom_empty: true,
+        }
+    }
+}
+
 fn main() {
     let mut stdin = io::stdin();
     let ctx = RenderContext::from_json(&mut stdin).unwrap();
+    let cfg: TinyConfig = ctx
+        .config
+        .get_deserialized_opt("output.tiny")
+        .unwrap_or_default()
+        .unwrap_or_default();
 
     let _ = fs::create_dir_all(&ctx.destination);
 
@@ -39,6 +67,7 @@ fn main() {
 
                 parse(
                     &ctx,
+                    &cfg,
                     &ch,
                     &ctx.destination.join(&path.with_extension("html")),
                     depth,
@@ -50,30 +79,43 @@ fn main() {
     // Optional: configurable
 
     // Set my index.html
-    let _ = fs::copy(
-        ctx.destination.join("getting-started.html"),
-        ctx.destination.join("index.html"),
-    );
+    if let Some(index) = cfg.index {
+        let html_index = PathBuf::from(index).with_extension("html");
+        let _ = fs::copy(
+            ctx.destination.join(html_index),
+            ctx.destination.join("index.html"),
+        );
+    };
 }
 
-fn parse(ctx: &RenderContext, ch: &Chapter, out_path: &PathBuf, depth: u8) {
+fn parse(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, out_path: &PathBuf, depth: u8) {
     // Create parser with example Markdown text.
-    if ch.is_draft_chapter() {
-        let parser = custom_parser(&"# Draft Chapter\nNot released yet...\nShhhhh...");
-        write_html(&ctx, &ch, parser, out_path, depth);
-    } else {
-        let parser = custom_parser(&ch.content);
-        write_html(&ctx, &ch, parser, out_path, depth);
-    }
+    let parser = match ch.is_draft_chapter() {
+        true => custom_parser(&"# Draft Chapter\nNot released yet...\nShhhhh..."),
+        false => custom_parser(&ch.content),
+    };
+    write_html(&ctx, &cfg, &ch, parser, out_path, depth);
 }
 
-fn write_html(ctx: &RenderContext, ch: &Chapter, parser: Parser, out_path: &PathBuf, depth: u8) {
+fn write_html(
+    ctx: &RenderContext,
+    cfg: &TinyConfig,
+    ch: &Chapter,
+    parser: Parser,
+    out_path: &PathBuf,
+    depth: u8,
+) {
     let _ = fs::create_dir_all(&out_path.parent().unwrap());
     let f = File::create(out_path).unwrap();
     let mut writer = BufWriter::new(f);
-    let mut css_path = "css/pico.classless.jade.min.css".to_string();
 
-    css_path = apply_depth(css_path, depth);
+    let css_content = match &cfg.css_path {
+        v if v.len() == 0 => v.to_string(), // if empty leave empty
+        val => format!(
+            "<style>{}</style>",
+            fs::read_to_string(ctx.source_dir().join(val)).unwrap()
+        ),
+    };
 
     let title_head = match &ctx.config.book.title {
         Some(name) => format!(
@@ -86,28 +128,29 @@ fn write_html(ctx: &RenderContext, ch: &Chapter, parser: Parser, out_path: &Path
         Some(desc) => format!("<meta name=\"description\" content=\"{desc}\">"),
         None => "".to_string(),
     };
-    let nav = parent_links(ctx, ch, depth).join("~");
+    let nav = parent_links(ctx, cfg, ch, depth).join(&cfg.nav_separator);
     let title = match &ctx.config.book.title {
         Some(name) => format!("<h1>{name}</h1>"),
         None => "".to_string(),
     };
 
     let _ = writer.write(
-        format!("<!doctype html>\n<head>{title_head}{description_head}<link rel=\"stylesheet\" href=\"{css_path}\"></head><body><header>{nav}</header><main>{title}")
+        format!("<!doctype html>\n<head>{title_head}{description_head}<meta charset=\"utf8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">{css_content}</head><body><header>{nav}</header><main>{title}")
             .as_bytes(),
     );
 
     let mutated = parser.map(|event| adjust_links(event, None));
+    // customize your md to html conversion
     // .map(|event| match event {
     //     _ => event,
     // });
     let _ = pulldown_cmark::html::write_html_io(&mut writer, mutated);
 
-    let bottom_nav = child_links(ctx, ch, depth).join(" ~ ");
+    let bottom_nav = child_links(ctx, cfg, ch, depth).join(&cfg.nav_separator);
     let _ = writer.write(format!("</main><footer>{bottom_nav}</footer></body></html>").as_bytes());
 }
 
-fn parent_links(ctx: &RenderContext, ch: &Chapter, depth: u8) -> Vec<String> {
+fn parent_links(ctx: &RenderContext, _cfg: &TinyConfig, ch: &Chapter, depth: u8) -> Vec<String> {
     let mut links: Vec<String> = vec![format!(
         "<a href=\"{}\">Home</a>",
         apply_depth("index.html".to_string(), depth)
@@ -139,18 +182,20 @@ fn parent_links(ctx: &RenderContext, ch: &Chapter, depth: u8) -> Vec<String> {
     return links;
 }
 
-fn child_links(ctx: &RenderContext, ch: &Chapter, depth: u8) -> Vec<String> {
+fn child_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -> Vec<String> {
     let mut links: Vec<String> = vec![];
     let parents = &ch.sub_items;
     if parents.len() == 0 {
-        return parent_links(ctx, ch, depth);
+        return match cfg.nav_bottom_empty {
+            true => links,
+            false => parent_links(ctx, cfg, ch, depth),
+        };
     }
     ctx.book
         .iter()
         .filter(|item| parents.contains(item))
         .for_each(|item| match item {
             BookItem::Chapter(ich) => {
-                println!("{}", ich.name);
                 if let Some(path) = ich.path.clone() {
                     links.push(format!(
                         "<a href=\"{}\">{}</a>",
