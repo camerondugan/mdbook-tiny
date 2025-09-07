@@ -9,6 +9,7 @@ use mdbook::{BookItem, book::Chapter};
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap; // used because it keeps things sorted alphabetically
 use std::fmt::Write;
 use std::io::Write as ioWrite;
 use std::path::Path;
@@ -25,6 +26,7 @@ pub struct TinyConfig {
     pub css_path: String,
     pub nav_separator: String,
     pub index: Option<String>,
+    pub extra_nav: BTreeMap<String, String>,
     pub nav_bottom_empty: bool,
 }
 
@@ -35,6 +37,7 @@ impl Default for TinyConfig {
             nav_separator: " - ".to_string(),
             index: None,
             nav_bottom_empty: true,
+            extra_nav: Default::default(),
         }
     }
 }
@@ -47,6 +50,11 @@ fn main() {
         .get_deserialized_opt("output.tiny")
         .unwrap_or_default()
         .unwrap_or_default();
+
+    // test if the cfg works
+    for nav in &cfg.extra_nav {
+        println!("{} => {}", nav.0, nav.1)
+    }
 
     let _ = fs::create_dir_all(&ctx.destination);
 
@@ -128,14 +136,9 @@ fn write_html(
         Some(desc) => format!("<meta name=\"description\" content=\"{desc}\">"),
         None => "".to_string(),
     };
-    let nav = parent_links(ctx, cfg, ch, depth).join(&cfg.nav_separator);
-    let title = match &ctx.config.book.title {
-        Some(name) => format!("<h1>{name}</h1>"),
-        None => "".to_string(),
-    };
-
+    let nav = nav_links(ctx, cfg, ch, depth).join(&cfg.nav_separator);
     let _ = writer.write(
-        format!("<!doctype html>\n<head>{title_head}{description_head}<meta charset=\"utf8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">{css_content}</head><body><header>{nav}</header><main>{title}")
+        format!("<!doctype html>\n<head>{title_head}{description_head}<meta charset=\"utf8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">{css_content}</head><body><header>{nav}</header><main>")
             .as_bytes(),
     );
 
@@ -150,20 +153,27 @@ fn write_html(
     let _ = writer.write(format!("</main><footer>{bottom_nav}</footer></body></html>").as_bytes());
 }
 
-fn parent_links(ctx: &RenderContext, _cfg: &TinyConfig, ch: &Chapter, depth: u8) -> Vec<String> {
+fn nav_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -> Vec<String> {
     let mut links: Vec<String> = vec![format!(
         "<a href=\"{}\">Home</a>",
         apply_depth("index.html".to_string(), depth)
     )];
-    let parents = &ch.parent_names;
-    if parents.len() == 0 {
-        return links;
+    for nav in &cfg.extra_nav {
+        links.push(format!(
+            "<a href=\"{}\">{}</a>",
+            Path::new(&apply_depth(nav.1.to_string(), depth))
+                .with_extension("html")
+                .to_str()
+                .unwrap(),
+            nav.0
+        ))
     }
+    let parents = &ch.parent_names;
     ctx.book.sections.iter().for_each(|sec| match sec {
         BookItem::Chapter(ich) => {
             if parents.iter().any(|p| p.eq(&ich.name)) {
                 if let Some(path) = ich.path.clone() {
-                    links.push(format!(
+                    let link = format!(
                         "<a href=\"{}\">{}</a>",
                         apply_depth(
                             path.with_extension("html")
@@ -173,7 +183,11 @@ fn parent_links(ctx: &RenderContext, _cfg: &TinyConfig, ch: &Chapter, depth: u8)
                             depth
                         ),
                         ich.name
-                    ))
+                    );
+                    // avoid exact duplicates
+                    if !links.contains(&link) {
+                        links.push(link)
+                    }
                 }
             }
         }
@@ -188,7 +202,7 @@ fn child_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -
     if parents.len() == 0 {
         return match cfg.nav_bottom_empty {
             true => links,
-            false => parent_links(ctx, cfg, ch, depth),
+            false => nav_links(ctx, cfg, ch, depth),
         };
     }
     ctx.book
