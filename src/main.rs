@@ -1,8 +1,8 @@
 extern crate mdbook;
 extern crate pulldown_cmark;
 
-use copy_dir::copy_dir;
 use mdbook::renderer::RenderContext;
+use mdbook::utils::fs::copy_files_except_ext;
 use mdbook::{BookItem, book::Chapter};
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag};
 use regex::Regex;
@@ -22,26 +22,8 @@ fn main() {
 
     let _ = fs::create_dir_all(&ctx.destination);
 
-    // Support rss extension
-    let _ = fs::copy(
-        ctx.source_dir().join("rss.xml"),
-        ctx.destination.join("rss.xml"),
-    );
-    // Support my old feed location
-    let _ = fs::copy(
-        ctx.source_dir().join("rss.xml"),
-        ctx.destination.join("feed.xml"),
-    );
-    // Support my game: Arbidor
-    let _ = copy_dir(
-        ctx.source_dir().join("arbidor"),
-        &ctx.destination.join("arbidor"),
-    );
-    // Load my css
-    let _ = copy_dir(
-        ctx.source_dir().parent().unwrap().join("css").join(""),
-        ctx.destination.join("css"),
-    );
+    // Copy over other files
+    let _ = copy_files_except_ext(&ctx.source_dir(), &ctx.destination, true, None, &["md"]);
 
     for item in ctx.book.iter() {
         if let BookItem::Chapter(ref ch) = *item {
@@ -56,6 +38,7 @@ fn main() {
                 depth -= 2; // unsure why this is the case
 
                 parse(
+                    &ctx,
                     &ch,
                     &ctx.destination.join(&path.with_extension("html")),
                     depth,
@@ -63,36 +46,54 @@ fn main() {
             }
         }
     }
-    // // Set my index.html
-    // let _ = fs::copy(
-    //     ctx.destination.join("getting-started.html"),
-    //     ctx.destination.join("index.html"),
-    // );
+    // TODO: Get first item from summary.md and make it the index
+    // Optional: configurable
+
+    // Set my index.html
+    let _ = fs::copy(
+        ctx.destination.join("getting-started.html"),
+        ctx.destination.join("index.html"),
+    );
 }
 
-fn parse(ch: &Chapter, out_path: &PathBuf, depth: u8) {
+fn parse(ctx: &RenderContext, ch: &Chapter, out_path: &PathBuf, depth: u8) {
     // Create parser with example Markdown text.
     if ch.is_draft_chapter() {
         let parser = custom_parser(&"# Draft Chapter\nNot released yet...\nShhhhh...");
-        write_html(parser, out_path, depth);
+        write_html(&ctx, &ch, parser, out_path, depth);
     } else {
         let parser = custom_parser(&ch.content);
-        write_html(parser, out_path, depth);
+        write_html(&ctx, &ch, parser, out_path, depth);
     }
 }
 
-fn write_html(parser: Parser, out_path: &PathBuf, depth: u8) {
+fn write_html(ctx: &RenderContext, ch: &Chapter, parser: Parser, out_path: &PathBuf, depth: u8) {
     let _ = fs::create_dir_all(&out_path.parent().unwrap());
     let f = File::create(out_path).unwrap();
     let mut writer = BufWriter::new(f);
-    let mut css_path = "css/pico.classless.jade.min.css".to_owned();
+    let mut css_path = "css/pico.classless.jade.min.css".to_string();
 
-    for _ in 0..depth {
-        css_path = format!("../{}", css_path)
-    }
+    css_path = apply_depth(css_path, depth);
+
+    let title_head = match &ctx.config.book.title {
+        Some(name) => format!(
+            "<title>{} - {name}</title><meta name=\"title\" content=\"{name}\">",
+            ch.name
+        ),
+        None => "".to_string(),
+    };
+    let description_head = match &ctx.config.book.description {
+        Some(desc) => format!("<meta name=\"description\" content=\"{desc}\">"),
+        None => "".to_string(),
+    };
+    let nav = parent_links(ctx, ch, depth).join("~");
+    let title = match &ctx.config.book.title {
+        Some(name) => format!("<h1>{name}</h1>"),
+        None => "".to_string(),
+    };
 
     let _ = writer.write(
-        format!("<!doctype html>\n<head><link rel=\"stylesheet\" href=\"{css_path}\"></head><body><main class=\"container\">")
+        format!("<!doctype html>\n<head>{title_head}{description_head}<link rel=\"stylesheet\" href=\"{css_path}\"></head><body><header>{nav}</header><main>{title}")
             .as_bytes(),
     );
 
@@ -102,7 +103,79 @@ fn write_html(parser: Parser, out_path: &PathBuf, depth: u8) {
     // });
     let _ = pulldown_cmark::html::write_html_io(&mut writer, mutated);
 
-    let _ = writer.write(format!("</main></body></html>").as_bytes());
+    let bottom_nav = child_links(ctx, ch, depth).join(" ~ ");
+    let _ = writer.write(format!("</main><footer>{bottom_nav}</footer></body></html>").as_bytes());
+}
+
+fn parent_links(ctx: &RenderContext, ch: &Chapter, depth: u8) -> Vec<String> {
+    let mut links: Vec<String> = vec![format!(
+        "<a href=\"{}\">Home</a>",
+        apply_depth("index.html".to_string(), depth)
+    )];
+    let parents = &ch.parent_names;
+    if parents.len() == 0 {
+        return links;
+    }
+    ctx.book.sections.iter().for_each(|sec| match sec {
+        BookItem::Chapter(ich) => {
+            if parents.iter().any(|p| p.eq(&ich.name)) {
+                if let Some(path) = ich.path.clone() {
+                    links.push(format!(
+                        "<a href=\"{}\">{}</a>",
+                        apply_depth(
+                            path.with_extension("html")
+                                .to_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            depth
+                        ),
+                        ich.name
+                    ))
+                }
+            }
+        }
+        _ => {}
+    });
+    return links;
+}
+
+fn child_links(ctx: &RenderContext, ch: &Chapter, depth: u8) -> Vec<String> {
+    let mut links: Vec<String> = vec![];
+    let parents = &ch.sub_items;
+    if parents.len() == 0 {
+        return parent_links(ctx, ch, depth);
+    }
+    ctx.book
+        .iter()
+        .filter(|item| parents.contains(item))
+        .for_each(|item| match item {
+            BookItem::Chapter(ich) => {
+                println!("{}", ich.name);
+                if let Some(path) = ich.path.clone() {
+                    links.push(format!(
+                        "<a href=\"{}\">{}</a>",
+                        apply_depth(
+                            path.with_extension("html")
+                                .to_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            depth
+                        ),
+                        ich.name,
+                    ));
+                }
+            }
+            _ => {}
+        });
+    return links;
+}
+
+fn apply_depth(path: String, depth: u8) -> String {
+    let mut ans = path;
+    for _ in 0..depth {
+        ans = format!("../{ans}");
+    }
+    return ans;
 }
 
 // my personal preferences of options (smart punctuation breaks my book)
@@ -111,7 +184,7 @@ fn custom_parser(input: &str) -> Parser {
     return Parser::new_ext(input, options);
 }
 
-// Stolen from mdbook's non-public fn
+// this is here only because mdbook didn't mark it as pub
 fn adjust_links<'a>(event: Event<'a>, path: Option<&Path>) -> Event<'a> {
     static SCHEME_LINK: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9+.-]*:").unwrap());
