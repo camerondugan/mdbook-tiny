@@ -92,7 +92,7 @@ fn write_html(parser: Parser, out_path: &PathBuf, depth: u8) {
     }
 
     let _ = writer.write(
-        format!("<!doctype html>\n<head><link rel=\"stylesheet\" href=\"{css_path}\"></head>")
+        format!("<!doctype html>\n<head><link rel=\"stylesheet\" href=\"{css_path}\"></head><body><main class=\"container\">")
             .as_bytes(),
     );
 
@@ -101,6 +101,8 @@ fn write_html(parser: Parser, out_path: &PathBuf, depth: u8) {
     //     _ => event,
     // });
     let _ = pulldown_cmark::html::write_html_io(&mut writer, mutated);
+
+    let _ = writer.write(format!("</main></body></html>").as_bytes());
 }
 
 // my personal preferences of options (smart punctuation breaks my book)
