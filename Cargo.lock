@@ -1176,7 +1176,7 @@ dependencies = [
 
 [[package]]
 name = "mdbook-tiny"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "mdbook",
  "pulldown-cmark 0.13.0",

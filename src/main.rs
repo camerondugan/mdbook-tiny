@@ -23,7 +23,7 @@ use std::{
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct TinyConfig {
-    pub css_path: String,
+    pub css_paths: Vec<String>,
     pub nav_separator: String,
     pub index: Option<String>,
     pub extra_nav: BTreeMap<String, String>,
@@ -33,7 +33,7 @@ pub struct TinyConfig {
 impl Default for TinyConfig {
     fn default() -> Self {
         Self {
-            css_path: Default::default(),
+            css_paths: Default::default(),
             nav_separator: " - ".to_string(),
             index: None,
             nav_bottom_empty: true,
@@ -117,13 +117,17 @@ fn write_html(
     let f = File::create(out_path).unwrap();
     let mut writer = BufWriter::new(f);
 
-    let css_content = match &cfg.css_path {
-        v if v.len() == 0 => v.to_string(), // if empty leave empty
-        val => format!(
-            "<style>{}</style>",
-            fs::read_to_string(ctx.source_dir().join(val)).unwrap()
-        ),
-    };
+    let css_content = &cfg
+        .css_paths
+        .iter()
+        .map(|v| {
+            format!(
+                "<style>{}</style>",
+                fs::read_to_string(ctx.source_dir().join(v)).unwrap()
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("");
 
     let title_head = match &ctx.config.book.title {
         Some(name) => format!(

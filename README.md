@@ -24,7 +24,7 @@ Add it as a backend in book.toml:
 [output.tiny]
 nav-separator = " - "
 # relative to your src folder
-css-path = "css/pico.classless.min.css"
+css-paths = ["css/pico.classless.min.css"]
 index = "getting-started.md"
 extra-nav.Blog = "blog.md"
 extra-nav.Projects = "projects.md"
