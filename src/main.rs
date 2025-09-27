@@ -84,7 +84,7 @@ fn main() {
         }
     }
     // TODO: Get first item from summary.md and make it the index
-    // Optional: configurable
+    // Ideally: configurable
 
     // Set my index.html
     if let Some(index) = cfg.index {
@@ -153,7 +153,7 @@ fn write_html(
     // });
     let _ = pulldown_cmark::html::write_html_io(&mut writer, mutated);
 
-    let bottom_nav = child_links(ctx, cfg, ch, depth).join(&cfg.nav_separator);
+    let bottom_nav = child_links(ctx, cfg, ch, depth).join("");
     let _ = writer.write(format!("</main><footer>{bottom_nav}</footer></body></html>").as_bytes());
 }
 
@@ -202,34 +202,36 @@ fn nav_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -> 
 
 fn child_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -> Vec<String> {
     let mut links: Vec<String> = vec![];
-    let parents = &ch.sub_items;
-    if parents.len() == 0 {
+    let children = &ch.sub_items;
+    if children.len() == 0 {
         return match cfg.nav_bottom_empty {
             true => links,
             false => nav_links(ctx, cfg, ch, depth),
         };
     }
-    ctx.book
-        .iter()
-        .filter(|item| parents.contains(item))
-        .for_each(|item| match item {
-            BookItem::Chapter(ich) => {
-                if let Some(path) = ich.path.clone() {
-                    links.push(format!(
-                        "<a href=\"{}\">{}</a>",
-                        apply_depth(
-                            path.with_extension("html")
-                                .to_str()
-                                .unwrap_or("")
-                                .to_string(),
-                            depth
-                        ),
-                        ich.name,
-                    ));
-                }
+    children.iter().for_each(|item| match item {
+        BookItem::Chapter(ich) => {
+            links.push("<ul>".to_string());
+            if let Some(path) = ich.path.clone() {
+                links.push(format!(
+                    "<li><a href=\"{}\">{}</a></li>",
+                    apply_depth(
+                        path.with_extension("html")
+                            .to_str()
+                            .unwrap_or("")
+                            .to_string(),
+                        depth
+                    ),
+                    ich.name,
+                ));
+                child_links(ctx, cfg, ich, depth)
+                    .iter()
+                    .for_each(|child| links.push(child.to_string()));
             }
-            _ => {}
-        });
+            links.push("</ul>".to_string());
+        }
+        _ => {}
+    });
     return links;
 }
 

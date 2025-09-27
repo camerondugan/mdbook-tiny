@@ -4,7 +4,7 @@ description = "Use mdbook to generate tiny and fast static sites"
 authors = ["Cameron Dugan <mdbook-tiny@camerondugan.com>"]
 repository = "https://github.com/camerondugan/mdbook-tiny"
 license = "MIT"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 
 [dependencies]
