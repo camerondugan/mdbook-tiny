@@ -3,6 +3,7 @@ extern crate pulldown_cmark;
 extern crate serde;
 extern crate serde_derive;
 
+use highlight_pulldown::highlight;
 use mdbook::renderer::RenderContext;
 use mdbook::utils::fs::copy_files_except_ext;
 use mdbook::{BookItem, book::Chapter};
@@ -146,7 +147,11 @@ fn write_html(
             .as_bytes(),
     );
 
-    let mutated = parser.map(|event| adjust_links(event, None));
+    let mutated = highlight(parser)
+        .unwrap()
+        .into_iter()
+        .map(|event| adjust_links(event, None));
+
     // customize your md to html conversion
     // .map(|event| match event {
     //     _ => event,
