@@ -141,9 +141,16 @@ fn write_html(
         Some(desc) => format!("<meta name=\"description\" content=\"{desc}\">"),
         None => "".to_string(),
     };
+
+    let book_title = &ctx.config.book.title;
+    let title_html = match book_title {
+        Some(t) => format!("<h1>{t}</h1>"),
+        None => "".to_string(),
+    };
     let nav = nav_links(ctx, cfg, ch, depth).join(&cfg.nav_separator);
+    let header = format!("{title_html}{nav}<hr>");
     let _ = writer.write(
-        format!("<!doctype html>\n<head>{title_head}{description_head}<meta charset=\"utf8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">{css_content}</head><body><header>{nav}</header><main>")
+        format!("<!doctype html>\n<head>{title_head}{description_head}<meta charset=\"utf8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">{css_content}</head><body><header>{header}</header><main>")
             .as_bytes(),
     );
 
@@ -249,7 +256,7 @@ fn apply_depth(path: String, depth: u8) -> String {
 }
 
 // my personal preferences of options (smart punctuation breaks my book)
-fn custom_parser(input: &str) -> Parser {
+fn custom_parser(input: &str) -> Parser<'_> {
     let options = Options::all().difference(Options::ENABLE_SMART_PUNCTUATION);
     return Parser::new_ext(input, options);
 }

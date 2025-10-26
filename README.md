@@ -4,13 +4,14 @@ An alternative backend to mdbook that generates minimal html from your md source
 
 Pages typically generated are under 14kb, much smaller than the pages you get from mdbook directly.
 
-## Trade-offs
-
-Pages without extra assets load on first response from server and get a near perfect lighthouse speed score.
+## What you gain
+Pages without extra assets load on first response from server and get a near perfect lighthouse speed score in most cases.
 
 You can keep generating your content both as an mdbook and in this tiny html format.
 
-To get this small size, you lose search, sidebar, code highlighting, code clipboard buttons, rust playground, click to pdf.
+## What you lose
+
+To get this small size, you lose search, sidebar, some code highlighting languages, code block clipboard buttons, rust playground, click to pdf.
 
 ## Setup
 

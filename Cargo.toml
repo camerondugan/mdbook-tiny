@@ -10,7 +10,8 @@ edition = "2024"
 [dependencies]
 mdbook = "0.4.52"
 pulldown-cmark = "0.13.0"
-highlight-pulldown = { git = "https://gitlab.com/cameron.dugan/highlight-pulldown" }
+# this is here to bump the version to work with newer pulldown-cmark
+highlight-pulldown = { git = "https://gitlab.com/cameron.dugan/highlight-pulldown", version = "0.2.2" }
 regex = "1.11.2"
 serde = "1.0.219"
 serde_derive = "1.0.219"
