@@ -15,6 +15,8 @@ To get this small size, you lose search, sidebar, some code highlighting languag
 
 ## Setup
 
+To use, you need to have the `mdbook-tiny` binary available in your terminal's PATH.
+
 ### Install from github:
 
 ```bash
@@ -27,7 +29,8 @@ cargo install --path ./mdbook-tiny
 cargo install mdbook-tiny
 ```
 
-Add it as a backend in book.toml:
+## Usage
+Add it as a backend in book.toml
 ```toml
 [output.tiny]
 nav-separator = " - "
