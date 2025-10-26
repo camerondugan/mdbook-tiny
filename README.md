@@ -15,7 +15,14 @@ To get this small size, you lose search, sidebar, some code highlighting languag
 
 ## Setup
 
-Install:
+### Install from github:
+
+```bash
+git clone https://github.com/camerondugan/mdbook-tiny.git
+cargo install --path ./mdbook-tiny
+```
+
+### or Install from cargo:
 ```bash
 cargo install mdbook-tiny
 ```
