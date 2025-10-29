@@ -175,14 +175,19 @@ fn nav_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -> 
         apply_depth("index.html".to_string(), depth)
     )];
     for nav in &cfg.extra_nav {
-        links.push(format!(
-            "<a href=\"{}\">{}</a>",
-            Path::new(&apply_depth(nav.1.to_string(), depth))
-                .with_extension("html")
-                .to_str()
-                .unwrap(),
-            nav.0
-        ))
+        // separate full urls from internal paths
+        if nav.1.starts_with("http://") || nav.1.starts_with("https://") {
+            links.push(format!("<a href=\"{}\">{}</a>", nav.1.to_string(), nav.0))
+        } else {
+            links.push(format!(
+                "<a href=\"{}\">{}</a>",
+                Path::new(&apply_depth(nav.1.to_string(), depth))
+                    .with_extension("html")
+                    .to_str()
+                    .unwrap(),
+                nav.0
+            ))
+        }
     }
     let parents = &ch.parent_names;
     ctx.book.sections.iter().for_each(|sec| match sec {
