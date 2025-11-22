@@ -7,10 +7,10 @@ use highlight_pulldown::highlight;
 use mdbook::renderer::RenderContext;
 use mdbook::utils::fs::copy_files_except_ext;
 use mdbook::{BookItem, book::Chapter};
-use pulldown_cmark::{CowStr, Event, Options, Parser, Tag};
+use pulldown_cmark::{CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap; // used because it keeps things sorted alphabetically
+use std::collections::BTreeMap; // Used because it keeps things sorted alphabetically
 use std::fmt::Write;
 use std::io::Write as ioWrite;
 use std::path::Path;
@@ -66,13 +66,7 @@ fn main() {
         if let BookItem::Chapter(ref ch) = *item {
             if let Some(path) = &ch.path {
                 // Write to a file
-                let mut depth = 0;
-                let mut tmp = Some(path.as_path()); // relative path from summary.md
-                while tmp.is_some() {
-                    depth += 1; // how far down is our file?
-                    tmp = tmp.unwrap().parent();
-                }
-                depth -= 2; // unsure why this is the case
+                let depth = (path.components().count()) as u8;
 
                 parse(
                     &ctx,
@@ -154,16 +148,116 @@ fn write_html(
             .as_bytes(),
     );
 
-    let mutated = highlight(parser)
+    let events = highlight(parser)
         .unwrap()
         .into_iter()
         .map(|event| adjust_links(event, None));
 
-    // customize your md to html conversion
-    // .map(|event| match event {
-    //     _ => event,
-    // });
-    let _ = pulldown_cmark::html::write_html_io(&mut writer, mutated);
+    enum State<'a> {
+        Default,
+        InHeading {
+            level: pulldown_cmark::HeadingLevel,
+            classes: Vec<CowStr<'a>>,
+            attrs: Vec<(CowStr<'a>, Option<CowStr<'a>>)>,
+            buffer: Vec<Event<'a>>,
+        },
+    }
+
+    let mut state = State::Default;
+    let mut new_events: Vec<Event> = Vec::new();
+
+    for event in events {
+        match state {
+            State::Default => {
+                if let Event::Start(Tag::Heading {
+                    level,
+                    id: _,
+                    classes,
+                    attrs,
+                }) = event
+                {
+                    state = State::InHeading {
+                        level,
+                        classes,
+                        attrs,
+                        buffer: vec![],
+                    };
+                } else {
+                    new_events.push(event);
+                }
+            }
+            State::InHeading {
+                level,
+                classes,
+                attrs,
+                mut buffer,
+            } => {
+                if let Event::End(TagEnd::Heading(..)) = event {
+                    let mut heading_text = String::new();
+                    for ev in &buffer {
+                        if let Event::Text(text) | Event::Code(text) = ev {
+                            heading_text.push_str(text);
+                        }
+                    }
+
+                    let slug = heading_text.to_lowercase().replace(' ', "-");
+
+                    let start_heading = Event::Start(Tag::Heading {
+                        level,
+                        id: Some(slug.clone().into()),
+                        classes,
+                        attrs,
+                    });
+                    new_events.push(start_heading);
+
+                    let link_url = format!("#{}", slug);
+                    let link_start = Event::Start(Tag::Link {
+                        link_type: LinkType::Inline,
+                        dest_url: link_url.into(),
+                        title: "".into(),
+                        id: "".into(),
+                    });
+                    new_events.push(link_start);
+
+                    new_events.append(&mut buffer);
+
+                    let link_end = Event::End(TagEnd::Link);
+                    new_events.push(link_end);
+
+                    new_events.push(event); // End(Heading)
+                    state = State::Default;
+                } else {
+                    buffer.push(event);
+                    state = State::InHeading {
+                        level,
+                        classes,
+                        attrs,
+                        buffer,
+                    };
+                }
+            }
+        }
+    }
+
+    if let State::InHeading {
+        level,
+        classes,
+        attrs,
+        mut buffer,
+    } = state
+    {
+        // unclosed heading, just dump it
+        let start_heading = Event::Start(Tag::Heading {
+            level,
+            id: None,
+            classes,
+            attrs,
+        });
+        new_events.push(start_heading);
+        new_events.append(&mut buffer);
+    }
+
+    let _ = pulldown_cmark::html::write_html_io(&mut writer, new_events.into_iter());
 
     let bottom_nav = child_links(ctx, cfg, ch, depth).join("");
     let _ = writer.write(format!("</main><footer>{bottom_nav}</footer></body></html>").as_bytes());
@@ -172,19 +266,17 @@ fn write_html(
 fn nav_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -> Vec<String> {
     let mut links: Vec<String> = vec![format!(
         "<a href=\"{}\">Home</a>",
-        apply_depth("index.html".to_string(), depth)
+        apply_depth("".to_string(), depth)
     )];
     for nav in &cfg.extra_nav {
         // separate full urls from internal paths
         if nav.1.starts_with("http://") || nav.1.starts_with("https://") {
             links.push(format!("<a href=\"{}\">{}</a>", nav.1.to_string(), nav.0))
         } else {
+
             links.push(format!(
                 "<a href=\"{}\">{}</a>",
-                Path::new(&apply_depth(nav.1.to_string(), depth))
-                    .with_extension("html")
-                    .to_str()
-                    .unwrap(),
+                apply_depth(nav.1.to_string().replace(".md", ""), depth),
                 nav.0
             ))
         }
@@ -197,10 +289,7 @@ fn nav_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -> 
                     let link = format!(
                         "<a href=\"{}\">{}</a>",
                         apply_depth(
-                            path.with_extension("html")
-                                .to_str()
-                                .unwrap_or("")
-                                .to_string(),
+                            path.to_str().unwrap_or("").replace(".md", ""),
                             depth
                         ),
                         ich.name
@@ -233,10 +322,7 @@ fn child_links(ctx: &RenderContext, cfg: &TinyConfig, ch: &Chapter, depth: u8) -
                 links.push(format!(
                     "<li><a href=\"{}\">{}</a></li>",
                     apply_depth(
-                        path.with_extension("html")
-                            .to_str()
-                            .unwrap_or("")
-                            .to_string(),
+                        path.to_str().unwrap_or("").replace(".md", ""),
                         depth
                     ),
                     ich.name,
@@ -303,7 +389,6 @@ fn adjust_links<'a>(event: Event<'a>, path: Option<&Path>) -> Event<'a> {
 
             if let Some(caps) = MD_LINK.captures(&dest) {
                 fixed_link.push_str(&caps["link"]);
-                fixed_link.push_str(".html");
                 if let Some(anchor) = caps.name("anchor") {
                     fixed_link.push_str(anchor.as_str());
                 }
